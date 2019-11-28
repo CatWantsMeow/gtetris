@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/nsf/termbox-go"
+
+	"github.com/CatWantsMeow/gtetris/log"
 )
 
 const (
@@ -24,6 +26,7 @@ const (
 	StatePaused
 	StateFinished
 	StateClosed
+	StateExiting
 )
 
 type Level struct {
@@ -89,6 +92,7 @@ type Stats struct {
 
 type Game struct {
 	screen  *Screen
+	ctrl 	*Controller
 	stats   *Stats
 	field   *Field
 	preview *Field
@@ -112,7 +116,7 @@ func (g *Game) generateBlock() {
 		g.curBlock = g.nextBlock.Copy(left, 0)
 	}
 	g.nextBlock = NewRandomBlock(PreviewLeft, PreviewTop)
-	Log.Debug("Generated new block.")
+	log.Debug("Generated new block.")
 
 	g.tryChangeLevel()
 	g.preview.Clear(false)
@@ -121,62 +125,9 @@ func (g *Game) generateBlock() {
 	g.stats.Blocks++
 
 	g.field.Clear(false)
-	err := g.curBlock.Check(g.field)
-	if err == OverlappingError {
-		g.finish()
-	}
-}
-
-func (g *Game) removeLines() {
-	removed := g.field.RemoveLines()
-	if removed > 0 {
-		g.stats.Score += g.level.LinePoints * int(math.Pow(2, float64(removed)))
-		g.stats.Lines += removed
-	}
-}
-
-func (g *Game) rotate() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if g.curBlock != nil {
-		ok := g.curBlock.TryRotate(g.field)
-		if ok {
-			Log.Debug("Rotated.")
-		} else {
-			Log.Debug("Failed to rotate.")
-		}
-		g.redraw()
-	}
-}
-
-func (g *Game) moveLeft() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if g.curBlock != nil {
-		ok := g.curBlock.TryMove(-1, 0, g.field)
-		if ok {
-			Log.Debug("Moved left.")
-		} else {
-			Log.Debug("Failed to move left.")
-		}
-		g.redraw()
-	}
-}
-
-func (g *Game) moveRight() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if g.curBlock != nil {
-		ok := g.curBlock.TryMove(1, 0, g.field)
-		if ok {
-			Log.Debug("Moved right.")
-		} else {
-			Log.Debug("Failed to move right.")
-		}
-		g.redraw()
+	if g.curBlock.Overlaps(g.field) {
+		g.state = StateFinished
+		log.Info("Changed state to finished.")
 	}
 }
 
@@ -187,21 +138,128 @@ func (g *Game) moveDown() {
 	if g.curBlock != nil {
 		ok := g.curBlock.TryMove(0, 1, g.field)
 		if !ok {
-			Log.Debug("Failed to move down.")
+			log.Debug("Failed to move down.")
 			g.curBlock.MustDraw(g.field, true)
 			g.removeLines()
 			g.generateBlock()
 		} else {
-			Log.Debug("Moved down.")
+			log.Debug("Moved down.")
 		}
 		g.redraw()
 	}
+}
+
+func (g *Game) removeLines() {
+	removed := g.field.RemoveFilledLines()
+	if removed > 0 {
+		g.stats.Score += g.level.LinePoints * int(math.Pow(2, float64(removed)))
+		g.stats.Lines += removed
+	}
+}
+
+func (g *Game) tryChangeLevel() {
+	for _, level := range levels {
+		elapsed := int(g.stats.Elapsed)
+		if g.fast {
+			elapsed *= FastGameMultiplier
+		}
+		if level.StartsAfter <= elapsed {
+			g.level = level
+		}
+	}
+	log.Info("Changed level to %s.", g.level.Name)
+	g.stats.Level = g.level.Name
 }
 
 func (g *Game) redraw() {
 	g.field.Clear(false)
 	g.curBlock.MustDraw(g.field, false)
 	g.screen.Draw(g.state, g.stats)
+}
+
+func (g *Game) init() {
+	g.ctrl.RegisterHandler(EventExit, func() {
+		g.state = StateExiting
+	})
+
+	g.ctrl.RegisterHandler(EventResize, func() {
+		g.screen.Resize()
+		g.redraw()
+	})
+
+	g.ctrl.RegisterHandler(EventNewGame, func() {
+		log.Info("Restarting game.")
+		g.start()
+	})
+
+	g.ctrl.RegisterHandler(EventPauseResume, func() {
+		switch g.state {
+		case StatePaused:
+			g.state = StateRunning
+			log.Info("Changed state to running.")
+		case StateRunning:
+			g.state = StatePaused
+			log.Info("Changed state to paused.")
+		}
+		g.redraw()
+	})
+
+	g.ctrl.RegisterHandler(EventUp, func() {
+		if g.state == StateRunning {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+
+			if g.curBlock != nil {
+				ok := g.curBlock.TryRotate(g.field)
+				if ok {
+					log.Debug("Rotated.")
+				} else {
+					log.Debug("Failed to rotate.")
+				}
+				g.redraw()
+			}
+		}
+	})
+
+	g.ctrl.RegisterHandler(EventLeft, func() {
+		if g.state == StateRunning {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+
+			if g.curBlock != nil {
+				ok := g.curBlock.TryMove(-1, 0, g.field)
+				if ok {
+					log.Debug("Moved left.")
+				} else {
+					log.Debug("Failed to move left.")
+				}
+				g.redraw()
+			}
+		}
+	})
+
+	g.ctrl.RegisterHandler(EventRight, func() {
+		if g.state == StateRunning {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+
+			if g.curBlock != nil {
+				ok := g.curBlock.TryMove(1, 0, g.field)
+				if ok {
+					log.Debug("Moved right.")
+				} else {
+					log.Debug("Failed to move right.")
+				}
+				g.redraw()
+			}
+		}
+	})
+
+	g.ctrl.RegisterHandler(EventDown, func() {
+		if g.state == StateRunning {
+			g.moveDown()
+		}
+	})
 }
 
 func (g *Game) start() {
@@ -219,116 +277,28 @@ func (g *Game) start() {
 	g.generateBlock()
 }
 
-func (g *Game) finish() {
-	g.state = StateFinished
-	Log.Info("Changed state to finished.")
-}
-
-func (g *Game) pauseOrResume() {
-	switch g.state {
-	case StatePaused:
-		g.state = StateRunning
-		Log.Info("Changed state to running.")
-	case StateRunning:
-		g.state = StatePaused
-		Log.Info("Changed state to paused.")
-	}
-	g.redraw()
-}
-
-func (g *Game) tryChangeLevel() {
-	for _, level := range levels {
-		elapsed := int(g.stats.Elapsed)
-		if g.fast {
-			elapsed *= FastGameMultiplier
-		}
-		if level.StartsAfter <= elapsed {
-			g.level = level
-		}
-	}
-	Log.Info("Changed level to %s.", g.level.Name)
-	g.stats.Level = g.level.Name
-}
-
-func (g *Game) keyboardLoop(done chan bool) {
-	defer g.Close()
-	for {
-		ev := termbox.PollEvent()
-		if ev.Type == termbox.EventResize {
-			g.screen.resize()
-			g.redraw()
-		}
-
-		if ev.Type == termbox.EventKey {
-			switch ev.Ch {
-			case 'p':
-				g.pauseOrResume()
-				continue
-			case 'n':
-				Log.Info("Restarting game.")
-				g.start()
-				continue
-			}
-
-			switch ev.Key {
-			case termbox.KeyCtrlC, termbox.KeyEsc, termbox.KeyCtrlD:
-				Log.Info("Received exit key.")
-				done <- true
-			}
-
-			if g.state == StateRunning {
-				switch ev.Key {
-				case termbox.KeyArrowUp:
-					g.rotate()
-				case termbox.KeyArrowLeft:
-					g.moveLeft()
-				case termbox.KeyArrowRight:
-					g.moveRight()
-				case termbox.KeyArrowDown:
-					g.moveDown()
-				}
-			}
-		}
-	}
-}
-
-func (g *Game) mainLoop() {
-	defer g.Close()
-	for {
-		if g.state == StateRunning {
-			g.moveDown()
-			g.stats.Elapsed += float64(g.level.Delay) / 1000
-			g.stats.Score += g.level.TickPoints
-		}
-		time.Sleep(time.Millisecond * time.Duration(g.level.Delay))
-	}
-}
-
 func (g *Game) Run() {
-	rand.Seed(time.Now().UnixNano())
-
 	err := termbox.Init()
 	if err != nil {
 		panic(err)
 	}
+    defer termbox.Close()
 
-	done := make(chan bool)
-	go g.keyboardLoop(done)
-	go g.mainLoop()
-
+	rand.Seed(time.Now().UnixNano())
+	g.init()
 	g.start()
-	select {
-	case <-done:
-		Log.Info("Exiting...")
-		g.Close()
-		return
-	}
-}
 
-func (g *Game) Close() {
-	if g.state != StateClosed {
-		g.state = StateClosed
-		termbox.Close()
+	go g.ctrl.Run()
+	for {
+		switch g.state {
+		case StateRunning:
+			g.moveDown()
+			g.stats.Elapsed += float64(g.level.Delay) / 1000
+			g.stats.Score += g.level.TickPoints
+		case StateExiting:
+			return
+		}
+		time.Sleep(time.Millisecond * time.Duration(g.level.Delay))
 	}
 }
 
@@ -340,6 +310,7 @@ func Run(debug bool, fast bool) {
 		field:   field,
 		preview: preview,
 		screen:  NewScreen(field, preview, debug),
+		ctrl:    NewController(),
 		state:   StateInit,
 		fast:    fast,
 		debug:   debug,

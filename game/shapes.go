@@ -1,218 +1,194 @@
 package game
 
 import (
-	"math/rand"
-
-	"github.com/nsf/termbox-go"
+    "math/rand"
 )
 
 var (
-	SShape Shape
-	ZShape Shape
-	OShape Shape
-	LShape Shape
-	JShape Shape
-	IShape Shape
-	TShape Shape
-	Shapes []Shape
-
-	lastID = 0
+    ZShape = Shape{
+        mask: [][]byte{
+            {1, 1, 0},
+            {0, 1, 1},
+        },
+        color: 1,
+    }
+    SShape = Shape{
+        mask: [][]byte{
+            {0, 1, 1},
+            {1, 1, 0},
+        },
+        color: 2,
+    }
+    OShape = Shape{
+        mask: [][]byte{
+            {1, 1},
+            {1, 1},
+        },
+        color: 3,
+    }
+    IShape = Shape{
+        mask: [][]byte{
+            {1, 1, 1, 1},
+        },
+        color: 4,
+    }
+    TShape = Shape{
+        mask: [][]byte{
+            {0, 1, 0},
+            {1, 1, 1},
+        },
+        color: 5,
+    }
+    JShape = Shape{
+        mask: [][]byte{
+            {1, 0, 0},
+            {1, 1, 1},
+        },
+        color: 6,
+    }
+    LShape = Shape{
+        mask: [][]byte{
+            {1, 1, 1},
+            {1, 0, 0},
+        },
+        color: 7,
+    }
+    Shapes = []Shape{
+        ZShape, SShape,
+        OShape, IShape,
+        TShape, JShape,
+        LShape,
+    }
 )
 
 type Shape struct {
-	mask  [][]int
-	color termbox.Attribute
+    mask  [][]byte
+    color uint16
 }
 
 type Block struct {
-	x     int
-	y     int
-	mask  [][]int
-	shape Shape
-	id    int
+    x     int
+    y     int
+    mask  [][]byte
+    shape Shape
 }
 
-func (t *Block) getCenter() (int, int) {
-	dy := len(t.mask) / 2
-	if len(t.mask)%2 == 0 {
-		dy--
-	}
-	dx := len(t.mask[0]) / 2
-	if len(t.mask[0])%2 == 0 {
-		dx--
-	}
-	return dx, dy
+func (b *Block) pos() (x int, y int) {
+    dy := len(b.mask) / 2
+    if len(b.mask)%2 == 0 {
+        dy--
+    }
+    dx := len(b.mask[0]) / 2
+    if len(b.mask[0])%2 == 0 {
+        dx--
+    }
+    return b.x - dx, b.y - dy
 }
 
-func (t *Block) Draw(field *Field, fixed bool) error {
-	dx, dy := t.getCenter()
-	for i := 0; i < len(t.mask); i++ {
-		for j := 0; j < len(t.mask[i]); j++ {
-			if t.mask[i][j] > 0 {
-				x := t.x + j - dx
-				y := t.y + i - dy
+func (b *Block) Draw(field *Field, fixed bool) error {
+    x, y := b.pos()
+    for i := 0; i < len(b.mask); i++ {
+        for j := 0; j < len(b.mask[i]); j++ {
+            if b.mask[i][j] != 0 {
+                x := x + j
+                y := y + i
 
-				val := t.mask[i][j]
-				if fixed {
-					val = FixedCellValue
-				}
+                val := MovingCellValue
+                if fixed {
+                    val = FixedCellValue
+                }
 
-				err := field.Set(x, y, val, t.shape.color)
-				if err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
+                err := field.Set(x, y, val, b.shape.color)
+                if err != nil {
+                    return err
+                }
+            }
+        }
+    }
+    return nil
 }
 
-func (t *Block) MustDraw(field *Field, fixed bool) {
-	err := t.Draw(field, fixed)
-	if err != nil {
-		panic(err)
-	}
+func (b *Block) MustDraw(field *Field, fixed bool) {
+    err := b.Draw(field, fixed)
+    if err != nil {
+        panic(err)
+    }
 }
 
-func (t *Block) Check(field *Field) error {
-	dx, dy := t.getCenter()
-	for i := 0; i < len(t.mask); i++ {
-		for j := 0; j < len(t.mask[i]); j++ {
-			val, _, _, err := field.Get(t.x+j-dx, t.y+i-dy)
-			if err != nil {
-				return err
-			}
-			if val != EmptyCellValue && t.mask[i][j] > 0 && t.mask[i][j] != val {
-				return OverlappingError
-			}
-		}
-	}
-	return nil
+func (b *Block) Overlaps(field *Field) bool {
+    x, y := b.pos()
+    for i := 0; i < len(b.mask); i++ {
+        for j := 0; j < len(b.mask[i]); j++ {
+            val, _, err := field.Get(x+j, y+i)
+            if err != nil {
+                return true
+            }
+            if b.mask[i][j] > 0 && val == FixedCellValue {
+                return true
+            }
+        }
+    }
+    return false
 }
 
-func (t *Block) TryMove(dx, dy int, field *Field) bool {
-	t.x += dx
-	t.y += dy
-	err := t.Check(field)
-	if err != nil {
-		t.x -= dx
-		t.y -= dy
-		return false
-	}
-	return true
+func (b *Block) TryMove(dx, dy int, field *Field) bool {
+    b.x += dx
+    b.y += dy
+    if b.Overlaps(field) {
+        b.x -= dx
+        b.y -= dy
+        return false
+    }
+    return true
 }
 
-func (t *Block) TryRotate(field *Field) bool {
-	n, m := len(t.mask), len(t.mask[0])
+func (b *Block) TryRotate(field *Field) bool {
+    n := len(b.mask)
+    m := len(b.mask[0])
 
-	mask := make([][]int, m, m)
-	for i := 0; i < m; i++ {
-		mask[i] = make([]int, n, n)
-	}
+    rotated := make([][]byte, m, m)
+    for i := 0; i < m; i++ {
+        rotated[i] = make([]byte, n, n)
+    }
 
-	for y := 0; y < n; y++ {
-		for x := 0; x < m; x++ {
-			mask[x][n-y-1] = t.mask[y][x]
-		}
-	}
+    for y := 0; y < n; y++ {
+        for x := 0; x < m; x++ {
+            rotated[x][n-y-1] = b.mask[y][x]
+        }
+    }
 
-	old := t.mask
-	t.mask = mask
-
-	err := t.Check(field)
-	if err != nil {
-		t.mask = old
-		return false
-	}
-	return true
+    old := b.mask
+    b.mask = rotated
+    if b.Overlaps(field) {
+        b.mask = old
+        return false
+    }
+    return true
 }
 
-func (t *Block) Copy(x, y int) *Block {
-	return NewBlock(x, y, t.shape)
+func (b *Block) Copy(x, y int) *Block {
+    return NewBlock(x, y, b.shape)
 }
 
 func NewBlock(x, y int, shape Shape) *Block {
-	lastID++
-	n, m := len(shape.mask), len(shape.mask[0])
+    n := len(shape.mask)
+    m := len(shape.mask[0])
 
-	mask := make([][]int, n, n)
-	for y := 0; y < n; y++ {
-		mask[y] = make([]int, m, m)
-		for x := 0; x < m; x++ {
-			if shape.mask[y][x] > 0 {
-				mask[y][x] = lastID
-			} else {
-				mask[y][x] = 0
-			}
-		}
-	}
+    mask := make([][]byte, n, n)
+    for i := 0; i < n; i++ {
+        mask[i] = make([]byte, m, m)
+        copy(mask[i], shape.mask[i])
+    }
 
-	return &Block{
-		x:     x,
-		y:     y,
-		mask:  mask,
-		shape: shape,
-	}
+    return &Block{
+        x:     x,
+        y:     y,
+        mask:  mask,
+        shape: shape,
+    }
 }
 
 func NewRandomBlock(x, y int) *Block {
-	i := rand.Intn(len(Shapes))
-	return NewBlock(x, y, Shapes[i])
-}
-
-func init() {
-	ZShape = Shape{
-		mask: [][]int{
-			{1, 1, 0},
-			{0, 1, 1},
-		},
-		color: termbox.ColorRed,
-	}
-	SShape = Shape{
-		mask: [][]int{
-			{0, 1, 1},
-			{1, 1, 0},
-		},
-		color: termbox.ColorGreen,
-	}
-	OShape = Shape{
-		mask: [][]int{
-			{1, 1},
-			{1, 1},
-		},
-		color: termbox.ColorYellow,
-	}
-	IShape = Shape{
-		mask: [][]int{
-			{1, 1, 1, 1},
-		},
-		color: termbox.ColorCyan,
-	}
-	TShape = Shape{
-		mask: [][]int{
-			{0, 1, 0},
-			{1, 1, 1},
-		},
-		color: termbox.ColorMagenta,
-	}
-	JShape = Shape{
-		mask: [][]int{
-			{1, 0, 0},
-			{1, 1, 1},
-		},
-		color: termbox.ColorBlue,
-	}
-	LShape = Shape{
-		mask: [][]int{
-			{1, 1, 1},
-			{1, 0, 0},
-		},
-		color: termbox.ColorWhite,
-	}
-	Shapes = []Shape{
-		ZShape, SShape,
-		OShape, IShape,
-		TShape, JShape,
-		LShape,
-	}
+    i := rand.Intn(len(Shapes))
+    return NewBlock(x, y, Shapes[i])
 }

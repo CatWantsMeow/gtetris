@@ -2,24 +2,21 @@ package game
 
 import (
 	"errors"
-
-	"github.com/nsf/termbox-go"
 )
 
 const (
-	FixedCellValue = -1
-	EmptyCellValue = 0
+	EmptyCellValue byte = iota
+	MovingCellValue
+	FixedCellValue
 )
 
 var (
-	OverlappingError      = errors.New("curBlock overlaps other one")
 	IndexOutOfBoundsError = errors.New("out of field bounds")
 )
 
 type Cell struct {
-	value int
-	char  rune
-	color termbox.Attribute
+	value byte
+	color uint16
 }
 
 type Field struct {
@@ -28,38 +25,35 @@ type Field struct {
 	cells  [][]Cell
 }
 
-func (f *Field) Set(x, y int, value int, color termbox.Attribute) error {
+func (f *Field) Set(x, y int, value byte, color uint16) error {
 	if x < 0 || x >= f.Width || y < 0 || y >= f.Height {
 		return IndexOutOfBoundsError
 	}
 	f.cells[y][x].color = color
 	f.cells[y][x].value = value
-	f.cells[y][x].char = BlockChar
 	return nil
 }
 
-func (f *Field) Get(x, y int) (int, rune, termbox.Attribute, error) {
+func (f *Field) Get(x, y int) (value byte, color uint16, err error) {
 	if x < 0 || x >= f.Width || y < 0 || y >= f.Height {
-		return 0, 0, 0, IndexOutOfBoundsError
+		return 0, 0, IndexOutOfBoundsError
 	}
 	cell := f.cells[y][x]
-	return cell.value, cell.char, cell.color, nil
+	return cell.value, cell.color, nil
 }
 
 func (f *Field) Clear(full bool) {
 	for i := 0; i < f.Height; i++ {
 		for j := 0; j < f.Width; j++ {
 			if full || f.cells[i][j].value != FixedCellValue {
-				f.cells[i][j].color = BackgroundColor
-				f.cells[i][j].char = BackgroundChar
 				f.cells[i][j].value = EmptyCellValue
+				f.cells[i][j].color = 0
 			}
 		}
 	}
 }
 
-func (f *Field) RemoveLines() int {
-	removed := 0
+func (f *Field) RemoveFilledLines() (removed int) {
 	for i := 1; i < f.Height; i++ {
 		full := true
 		for j := 0; j < f.Width; j++ {

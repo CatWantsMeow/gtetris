@@ -1,4 +1,4 @@
-package game
+package log
 
 import (
 	"fmt"
@@ -7,10 +7,10 @@ import (
 )
 
 const (
-	LogLevelDebug   = "D"
-	LogLevelInfo    = "I"
-	LogLevelWarning = "W"
-	LogLevelError   = "E"
+	LevelDebug   = "D"
+	LevelInfo    = "I"
+	LevelWarning = "W"
+	LevelError   = "E"
 )
 
 type Logger struct {
@@ -22,22 +22,6 @@ func (l *Logger) Log(level string, msg string, args ...interface{}) {
 	timestamp := time.Now().Format("15:04:05.0000")
 	entry := level + " [" + timestamp + "] " + msg
 	l.entries = append(l.entries, entry)
-}
-
-func (l *Logger) Debug(msg string, args ...interface{}) {
-	l.Log(LogLevelDebug, msg, args...)
-}
-
-func (l *Logger) Info(msg string, args ...interface{}) {
-	l.Log(LogLevelInfo, msg, args...)
-}
-
-func (l *Logger) Warning(msg string, args ...interface{}) {
-	l.Log(LogLevelWarning, msg, args...)
-}
-
-func (l *Logger) Error(msg string, args ...interface{}) {
-	l.Log(LogLevelError, msg, args...)
 }
 
 func (l *Logger) String(tail int, width int) string {
@@ -60,5 +44,25 @@ func (l *Logger) String(tail int, width int) string {
 }
 
 var (
-	Log = Logger{}
+	logger = Logger{}
 )
+
+func Debug(msg string, args ...interface{}) {
+	logger.Log(LevelDebug, msg, args...)
+}
+
+func Info(msg string, args ...interface{}) {
+	logger.Log(LevelInfo, msg, args...)
+}
+
+func Warning(msg string, args ...interface{}) {
+	logger.Log(LevelWarning, msg, args...)
+}
+
+func Error(msg string, args ...interface{}) {
+	logger.Log(LevelError, msg, args...)
+}
+
+func String(tail, width int) string {
+	return logger.String(tail, width)
+}
